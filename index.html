@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>プロ仕様PDFメーカー</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root { --primary: #4a90e2; --bg: #f8f9fa; }
+        body { font-family: sans-serif; background: var(--bg); display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
+        .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; padding: 15px; background: #eee; border-radius: 8px; }
+        .setting-item { display: flex; flex-direction: column; font-size: 0.8rem; }
+        #drop-area { border: 2px dashed var(--primary); border-radius: 10px; height: 100px; display: flex; align-items: center; justify-content: center; background: #eef6ff; cursor: pointer; margin-bottom: 20px; }
+        #preview { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 20px; }
+        .preview-img { width: 60px; height: 60px; object-fit: cover; border: 1px solid #ccc; }
+        .actions { display: flex; gap: 10px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        #download-btn { background: var(--primary); color: white; }
+        #clear-btn { background: #ddd; }
+        #status { margin-top: 10px; text-align: center; color: #e67e22; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3 style="text-align:center">PDF変換 (比率維持モデル)</h3>
+
+    <div class="settings">
+        <div class="setting-item">
+            <label>1ページの枚数</label>
+            <select id="layout-select">
+                <option value="4">4枚 (2x2)</option>
+                <option value="6">6枚 (2x3)</option>
+                <option value="8">8枚 (2x4)</option>
+            </select>
+        </div>
+        <div class="setting-item">
+            <label>印刷方向</label>
+            <select id="orientation-select">
+                <option value="p">縦 (Portrait)</option>
+                <option value="l">横 (Landscape)</option>
+            </select>
+        </div>
+        <div class="setting-item">
+            <label>画質</label>
+            <select id="quality-select">
+                <option value="0.3">低</option>
+                <option value="0.6" selected>中</option>
+                <option value="0.9">高</option>
+            </select>
+        </div>
+        <div class="setting-item">
+            <label>最大リサイズ(px)</label>
+            <select id="size-select">
+                <option value="1200" selected>1200px</option>
+                <option value="2000">2000px</option>
+            </select>
+        </div>
+    </div>
+    
+    <div id="drop-area">画像をドロップ</div>
+    <div id="preview"></div>
+
+    <div class="actions">
+        <button id="clear-btn">クリア</button>
+        <button id="download-btn" disabled>PDF作成</button>
+    </div>
+    <div id="status"></div>
+</div>
+
+<script>
+    const dropArea = document.getElementById('drop-area');
+    const preview = document.getElementById('preview');
+    const downloadBtn = document.getElementById('download-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const status = document.getElementById('status');
+    
+    let imageFiles = [];
+
+    dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.style.background = "#d0e6ff"; });
+    dropArea.addEventListener('dragleave', () => { dropArea.style.background = "#eef6ff"; });
+    dropArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropArea.style.background = "#eef6ff";
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        imageFiles = [...imageFiles, ...files];
+        updateUI();
+    });
+
+    function updateUI() {
+        preview.innerHTML = '';
+        imageFiles.forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'preview-img';
+                preview.appendChild(img);
+            };
+            reader.readAsDataURL(file);
+        });
+        downloadBtn.disabled = imageFiles.length === 0;
+        status.textContent = `${imageFiles.length}枚選択中`;
+    }
+
+    clearBtn.addEventListener('click', () => { imageFiles = []; updateUI(); });
+
+    // 画像処理（サイズ情報も一緒に返す）
+    async function processImage(file, maxW, quality) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let w = img.width, h = img.height;
+                    if (w > maxW) { h = (maxW / w) * h; w = maxW; }
+                    canvas.width = w; canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    resolve({
+                        data: canvas.toDataURL('image/jpeg', parseFloat(quality)),
+                        w: w, h: h
+                    });
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    downloadBtn.addEventListener('click', async () => {
+        status.textContent = "生成中...";
+        const { jsPDF } = window.jspdf;
+
+        const layoutCount = parseInt(document.getElementById('layout-select').value);
+        const orient = document.getElementById('orientation-select').value;
+        const quality = document.getElementById('quality-select').value;
+        const maxW = parseInt(document.getElementById('size-select').value);
+
+        const doc = new jsPDF(orient, 'mm', 'a4');
+        const pw = orient === 'p' ? 210 : 297;
+        const ph = orient === 'p' ? 297 : 210;
+        const margin = 10;
+        const gap = 5;
+
+        const cols = 2;
+        const rows = layoutCount / cols;
+        
+        // 1つあたりの「枠」のサイズ
+        const frameW = (pw - (margin * 2) - gap * (cols - 1)) / cols;
+        const frameH = (ph - (margin * 2) - gap * (rows - 1)) / rows;
+
+        for (let i = 0; i < imageFiles.length; i++) {
+            if (i > 0 && i % layoutCount === 0) doc.addPage();
+
+            const imgObj = await processImage(imageFiles[i], maxW, quality);
+            
+            // --- 比率維持の計算 ---
+            let drawW = frameW;
+            let drawH = (imgObj.h / imgObj.w) * frameW;
+
+            if (drawH > frameH) {
+                drawH = frameH;
+                drawW = (imgObj.w / imgObj.h) * frameH;
+            }
+
+            // 中央寄せのためのオフセット
+            const offsetX = (frameW - drawW) / 2;
+            const offsetY = (frameH - drawH) / 2;
+            // ---------------------
+
+            const pageIdx = i % layoutCount;
+            const col = pageIdx % cols;
+            const row = Math.floor(pageIdx / cols);
+
+            const x = margin + (col * (frameW + gap)) + offsetX;
+            const y = margin + (row * (frameH + gap)) + offsetY;
+
+            doc.addImage(imgObj.data, 'JPEG', x, y, drawW, drawH);
+        }
+
+        doc.save('layout_fixed.pdf');
+        status.textContent = "完了！";
+    });
+</script>
+</body>
+</html>
