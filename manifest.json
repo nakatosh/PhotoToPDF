@@ -1,7 +1,7 @@
 {
   "name": "写真 to PDF",
   "short_name": "写真PDF",
-  "description": "写真をまとめてPDFに変換する社内用PWA",
+  "description": "写真をまとめてPDFに変換するPWA",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f8f9fa",
